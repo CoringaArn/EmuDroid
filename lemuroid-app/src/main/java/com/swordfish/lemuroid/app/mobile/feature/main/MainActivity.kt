@@ -13,7 +13,10 @@ import com.swordfish.lemuroid.app.shared.GameInteractor
 import com.swordfish.lemuroid.app.shared.game.GameLauncher
 import com.swordfish.lemuroid.app.shared.main.BusyActivity
 import com.swordfish.lemuroid.lib.android.RetrogradeComponentActivity
+import com.swordfish.lemuroid.lib.core.CoreUpdater
+import com.swordfish.lemuroid.lib.core.CoresSelection
 import com.swordfish.lemuroid.lib.injection.PerActivity
+import com.swordfish.lemuroid.lib.library.GameSystem
 import com.swordfish.lemuroid.lib.library.SystemID
 import com.swordfish.lemuroid.lib.library.db.RetrogradeDatabase
 import com.swordfish.lemuroid.lib.library.db.entity.Game
@@ -43,13 +46,16 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     @Inject
     lateinit var directoriesManager: DirectoriesManager
 
+    @Inject
+    lateinit var coreUpdater: CoreUpdater
+
+    @Inject
+    lateinit var coresSelection: CoresSelection
+
     // CONFIGURACAO DO JOGO
     private val gameTitle = "GTA: Liberty City Stories"
     private val gameSystemId = SystemID.PSP.dbname
-
-    // Pixeldrain - link direto
     private val gameUrl = "https://pixeldrain.com/api/file/ZYaNEnUf"
-
     private val gameFileName = "Gta Liberty City Stories.iso"
     private val minFileSize = 100L * 1024 * 1024
 
@@ -113,32 +119,32 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
         GlobalScope.launch {
             try {
                 Log.d("EmuDroid", "=== INICIANDO ===")
-                Log.d("EmuDroid", "gameFile: ${gameFile.absolutePath}")
-                Log.d("EmuDroid", "Existe? ${gameFile.exists()}")
-                Log.d("EmuDroid", "Tamanho: ${gameFile.length()} bytes")
 
+                // 1. Baixa a ROM (se nao existir)
                 if (!gameFile.exists() || gameFile.length() < minFileSize) {
-                    if (gameFile.exists()) {
-                        Log.d("EmuDroid", "Arquivo pequeno, deletando...")
-                        gameFile.delete()
-                    }
+                    if (gameFile.exists()) gameFile.delete()
 
                     updateStatus("Baixando GTA...", 0)
                     downloadFile(gameUrl, gameFile)
-                    Log.d("EmuDroid", "Download concluido: ${gameFile.length()} bytes")
 
                     if (gameFile.length() < minFileSize) {
                         throw Exception("Download incompleto: ${gameFile.length()} bytes")
                     }
-                } else {
-                    Log.d("EmuDroid", "ROM ja existe")
                 }
 
+                // 2. Baixa o core (se nao existir)
+                updateStatus("Baixando core do PSP...", 100)
+                val system = GameSystem.findById(gameSystemId)
+                val coreConfig = coresSelection.getCoreConfigForSystem(system)
+                Log.d("EmuDroid", "Core: ${coreConfig.coreID.coreName}")
+                coreUpdater.downloadCores(applicationContext, listOf(coreConfig.coreID))
+
+                // 3. Cria o Game no banco
                 updateStatus("Preparando o jogo...", 100)
                 val game = findOrCreateGame()
 
+                // 4. Roda
                 updateStatus("Iniciando o jogo...", 100)
-
                 runOnUiThread {
                     gameInteractor.onGamePlay(game)
                 }
@@ -169,7 +175,6 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
             val body = response.body ?: throw Exception("Download falhou: body vazio")
 
             val totalBytes = body.contentLength()
-            Log.d("EmuDroid", "Tamanho total: $totalBytes bytes")
             var downloadedBytes = 0L
 
             body.byteStream().use { input ->
@@ -186,8 +191,7 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
                             val detail = "${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}"
                             updateStatus("Baixando GTA...", progress, detail)
                         } else {
-                            val detail = formatBytes(downloadedBytes)
-                            updateStatus("Baixando GTA...", 0, detail)
+                            updateStatus("Baixando GTA...", 0, formatBytes(downloadedBytes))
                         }
                     }
                 }
