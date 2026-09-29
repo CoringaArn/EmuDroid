@@ -2,7 +2,12 @@ package com.swordfish.lemuroid.app.mobile.feature.main
 
 import android.app.Activity
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import com.swordfish.lemuroid.app.mobile.feature.shortcuts.ShortcutsGenerator
 import com.swordfish.lemuroid.app.shared.GameInteractor
 import com.swordfish.lemuroid.app.shared.game.GameLauncher
@@ -21,6 +26,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.util.Locale
 import javax.inject.Inject
 
 @OptIn(DelicateCoroutinesApi::class)
@@ -47,34 +53,96 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     private val gameFile: File
         get() = File(directoriesManager.getInternalRomsDirectory(), gameFileName)
 
+    // UI
+    private lateinit var statusText: TextView
+    private lateinit var progressBar: ProgressBar
+    private lateinit var detailText: TextView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Tela preta (esconde a UI)
-        setContentView(View(this))
+        // Cria a UI (tela preta + barra de progresso)
+        val layout =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setBackgroundColor(android.graphics.Color.BLACK)
+                layoutParams =
+                    ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+            }
+
+        statusText =
+            TextView(this).apply {
+                text = "Iniciando..."
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 20f
+                gravity = Gravity.CENTER
+            }
+
+        progressBar =
+            ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 100
+                progress = 0
+                layoutParams =
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply {
+                        setMargins(50, 50, 50, 50)
+                    }
+            }
+
+        detailText =
+            TextView(this).apply {
+                text = ""
+                setTextColor(android.graphics.Color.LTGRAY)
+                textSize = 14f
+                gravity = Gravity.CENTER
+            }
+
+        layout.addView(statusText)
+        layout.addView(progressBar)
+        layout.addView(detailText)
+
+        setContentView(layout)
 
         GlobalScope.launch {
             try {
                 // 1. Verifica se a ROM existe
                 if (!gameFile.exists() || gameFile.length() == 0L) {
-                    // 2. Resolve o link do MediaFire
+                    updateStatus("Resolvendo link do MediaFire...", 0)
                     val directUrl = resolveMediaFire(gameUrl)
 
-                    // 3. Baixa a ROM
+                    updateStatus("Baixando GTA...", 0)
                     downloadFile(directUrl, gameFile)
                 }
 
-                // 4. Cria/busca o Game no banco
+                updateStatus("Preparando o jogo...", 100)
+
+                // 2. Cria/busca o Game no banco
                 val game = findOrCreateGame()
 
-                // 5. Roda o jogo
+                updateStatus("Iniciando o jogo...", 100)
+
+                // 3. Roda o jogo
                 runOnUiThread {
                     gameInteractor.onGamePlay(game)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                runOnUiThread { finish() }
+                updateStatus("Erro: ${e.message}", 0)
             }
+        }
+    }
+
+    private fun updateStatus(message: String, progress: Int, detail: String = "") {
+        runOnUiThread {
+            statusText.text = message
+            progressBar.progress = progress
+            detailText.text = detail
         }
     }
 
@@ -88,7 +156,6 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
 
             val html = okHttpClient.newCall(request).execute().body?.string() ?: ""
 
-            // Procura o link direto no HTML
             val regex = Regex("""href="(https://download[^"]+\.mediafire\.com[^"]+)"""")
             val match = regex.find(html)
 
@@ -107,12 +174,40 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
             val response = okHttpClient.newCall(request).execute()
             val body = response.body ?: throw Exception("Download falhou: body vazio")
 
+            val totalBytes = body.contentLength()
+            var downloadedBytes = 0L
+
             body.byteStream().use { input ->
                 destination.outputStream().use { output ->
-                    input.copyTo(output)
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+
+                        if (totalBytes > 0) {
+                            val progress = ((downloadedBytes * 100) / totalBytes).toInt()
+                            val detail = "${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}"
+                            updateStatus("Baixando GTA...", progress, detail)
+                        } else {
+                            val detail = formatBytes(downloadedBytes)
+                            updateStatus("Baixando GTA...", 0, detail)
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B"
+        val kb = bytes / 1024.0
+        if (kb < 1024) return String.format(Locale.US, "%.1f KB", kb)
+        val mb = kb / 1024.0
+        if (mb < 1024) return String.format(Locale.US, "%.1f MB", mb)
+        val gb = mb / 1024.0
+        return String.format(Locale.US, "%.2f GB", gb)
     }
 
     private suspend fun findOrCreateGame(): Game {
