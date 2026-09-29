@@ -13,12 +13,12 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.swordfish.lemuroid.app.mobile.feature.shortcuts.ShortcutsGenerator
+import com.swordfish.lemuroid.app.shared.GameInteractor
 import com.swordfish.lemuroid.app.shared.game.GameLauncher
 import com.swordfish.lemuroid.app.shared.main.BusyActivity
 import com.swordfish.lemuroid.lib.android.RetrogradeComponentActivity
-import com.swordfish.lemuroid.lib.core.CoreUpdater
-import com.swordfish.lemuroid.lib.core.CoresSelection
-import com.swordfish.lemuroid.lib.library.GameSystem
+import com.swordfish.lemuroid.lib.injection.PerActivity
 import com.swordfish.lemuroid.lib.library.SystemID
 import com.swordfish.lemuroid.lib.library.db.RetrogradeDatabase
 import com.swordfish.lemuroid.lib.library.db.entity.Game
@@ -37,7 +37,7 @@ import javax.inject.Inject
 @OptIn(DelicateCoroutinesApi::class)
 class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     @Inject
-    lateinit var gameLauncher: GameLauncher
+    lateinit var gameInteractor: GameInteractor
 
     @Inject
     lateinit var retrogradeDb: RetrogradeDatabase
@@ -48,19 +48,12 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     @Inject
     lateinit var directoriesManager: DirectoriesManager
 
-    @Inject
-    lateinit var coreUpdater: CoreUpdater
-
-    @Inject
-    lateinit var coresSelection: CoresSelection
-
     // CONFIGURACAO DO JOGO
     private val gameTitle = "GTA: Liberty City Stories"
     private val gameSystemId = SystemID.PSP.dbname
     private val gameUrl = "https://pixeldrain.com/api/file/ZYaNEnUf"
     private val gameFileName = "Gta Liberty City Stories.iso"
     private val minFileSize = 100L * 1024 * 1024
-
     private val NOTIFICATION_PERMISSION_REQUEST = 1001
 
     private val gameFile: File
@@ -153,11 +146,11 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
 
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Log.d("EmuDroid", "Permissao de notificacao concedida")
+                Log.d("EmuDroid", "Permissao concedida")
                 startGameFlow()
             } else {
-                Log.d("EmuDroid", "Permissao de notificacao negada")
-                updateStatus("Permissao negada. Reinicie o app e permita notificacoes.", 0)
+                Log.d("EmuDroid", "Permissao negada")
+                updateStatus("Permissao negada. Reinicie o app.", 0)
             }
         }
     }
@@ -167,7 +160,7 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
             try {
                 Log.d("EmuDroid", "=== INICIANDO ===")
 
-                // 1. Baixa a ROM (se nao existir)
+                // 1. Baixa a ROM
                 if (!gameFile.exists() || gameFile.length() < minFileSize) {
                     if (gameFile.exists()) gameFile.delete()
 
@@ -179,25 +172,18 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
                     }
                 }
 
-                // 2. Baixa o core (se nao existir)
-                updateStatus("Baixando core do PSP...", 100)
-                val system = GameSystem.findById(gameSystemId)
-                val coreConfig = coresSelection.getCoreConfigForSystem(system)
-                Log.d("EmuDroid", "Core: ${coreConfig.coreID.coreName}")
-                coreUpdater.downloadCores(applicationContext, listOf(coreConfig.coreID))
-
-                // 3. Cria o Game no banco
+                // 2. Cria o Game no banco
                 updateStatus("Preparando o jogo...", 100)
                 val game = findOrCreateGame()
                 Log.d("EmuDroid", "Game: ${game.title} (id=${game.id})")
 
-                // 4. Roda o jogo DIRETO (pula o gameInteractor)
+                // 3. Roda o jogo (gameInteractor, agora sem bloqueio)
                 updateStatus("Iniciando o jogo...", 100)
-                Log.d("EmuDroid", "Chamando launchGameAsync...")
+                Log.d("EmuDroid", "Chamando gameInteractor.onGamePlay...")
 
                 runOnUiThread {
-                    gameLauncher.launchGameAsync(this@MainActivity, game, true, false)
-                    Log.d("EmuDroid", "launchGameAsync chamado")
+                    gameInteractor.onGamePlay(game)
+                    Log.d("EmuDroid", "onGamePlay chamado")
                 }
             } catch (e: Exception) {
                 Log.e("EmuDroid", "ERRO", e)
@@ -282,4 +268,20 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     override fun activity(): Activity = this
 
     override fun isBusy(): Boolean = false
+
+    @dagger.Module
+    abstract class Module {
+        @dagger.Module
+        companion object {
+            @dagger.Provides
+            @PerActivity
+            @JvmStatic
+            fun gameInteractor(
+                activity: MainActivity,
+                retrogradeDb: RetrogradeDatabase,
+                shortcutsGenerator: ShortcutsGenerator,
+                gameLauncher: GameLauncher,
+            ): GameInteractor = GameInteractor(activity, retrogradeDb, false, shortcutsGenerator, gameLauncher)
+        }
+    }
 }
