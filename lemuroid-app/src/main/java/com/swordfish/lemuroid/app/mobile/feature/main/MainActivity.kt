@@ -1,6 +1,9 @@
 package com.swordfish.lemuroid.app.mobile.feature.main
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -8,14 +11,13 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import com.swordfish.lemuroid.app.mobile.feature.shortcuts.ShortcutsGenerator
-import com.swordfish.lemuroid.app.shared.GameInteractor
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.swordfish.lemuroid.app.shared.game.GameLauncher
 import com.swordfish.lemuroid.app.shared.main.BusyActivity
 import com.swordfish.lemuroid.lib.android.RetrogradeComponentActivity
 import com.swordfish.lemuroid.lib.core.CoreUpdater
 import com.swordfish.lemuroid.lib.core.CoresSelection
-import com.swordfish.lemuroid.lib.injection.PerActivity
 import com.swordfish.lemuroid.lib.library.GameSystem
 import com.swordfish.lemuroid.lib.library.SystemID
 import com.swordfish.lemuroid.lib.library.db.RetrogradeDatabase
@@ -35,7 +37,7 @@ import javax.inject.Inject
 @OptIn(DelicateCoroutinesApi::class)
 class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     @Inject
-    lateinit var gameInteractor: GameInteractor
+    lateinit var gameLauncher: GameLauncher
 
     @Inject
     lateinit var retrogradeDb: RetrogradeDatabase
@@ -58,6 +60,8 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     private val gameUrl = "https://pixeldrain.com/api/file/ZYaNEnUf"
     private val gameFileName = "Gta Liberty City Stories.iso"
     private val minFileSize = 100L * 1024 * 1024
+
+    private val NOTIFICATION_PERMISSION_REQUEST = 1001
 
     private val gameFile: File
         get() = File(directoriesManager.getInternalRomsDirectory(), gameFileName)
@@ -116,6 +120,49 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
 
         setContentView(layout)
 
+        // Pede permissao de notificacao ANTES de tudo
+        if (needsNotificationPermission()) {
+            updateStatus("Permissao de notificacao necessaria...", 0)
+            requestNotificationPermission()
+            return
+        }
+
+        startGameFlow()
+    }
+
+    private fun needsNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestNotificationPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            NOTIFICATION_PERMISSION_REQUEST,
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d("EmuDroid", "Permissao de notificacao concedida")
+                startGameFlow()
+            } else {
+                Log.d("EmuDroid", "Permissao de notificacao negada")
+                updateStatus("Permissao negada. Reinicie o app e permita notificacoes.", 0)
+            }
+        }
+    }
+
+    private fun startGameFlow() {
         GlobalScope.launch {
             try {
                 Log.d("EmuDroid", "=== INICIANDO ===")
@@ -142,11 +189,15 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
                 // 3. Cria o Game no banco
                 updateStatus("Preparando o jogo...", 100)
                 val game = findOrCreateGame()
+                Log.d("EmuDroid", "Game: ${game.title} (id=${game.id})")
 
-                // 4. Roda
+                // 4. Roda o jogo DIRETO (pula o gameInteractor)
                 updateStatus("Iniciando o jogo...", 100)
+                Log.d("EmuDroid", "Chamando launchGameAsync...")
+
                 runOnUiThread {
-                    gameInteractor.onGamePlay(game)
+                    gameLauncher.launchGameAsync(this@MainActivity, game, true, false)
+                    Log.d("EmuDroid", "launchGameAsync chamado")
                 }
             } catch (e: Exception) {
                 Log.e("EmuDroid", "ERRO", e)
@@ -231,20 +282,4 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     override fun activity(): Activity = this
 
     override fun isBusy(): Boolean = false
-
-    @dagger.Module
-    abstract class Module {
-        @dagger.Module
-        companion object {
-            @dagger.Provides
-            @PerActivity
-            @JvmStatic
-            fun gameInteractor(
-                activity: MainActivity,
-                retrogradeDb: RetrogradeDatabase,
-                shortcutsGenerator: ShortcutsGenerator,
-                gameLauncher: GameLauncher,
-            ): GameInteractor = GameInteractor(activity, retrogradeDb, false, shortcutsGenerator, gameLauncher)
-        }
-    }
 }
