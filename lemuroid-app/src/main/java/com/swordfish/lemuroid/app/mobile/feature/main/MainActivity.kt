@@ -46,10 +46,12 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
     // CONFIGURACAO DO JOGO
     private val gameTitle = "GTA: Liberty City Stories"
     private val gameSystemId = SystemID.PSP.dbname
-    private val gameUrl =
-        "https://www.mediafire.com/file/zynrl10zbnaryl5/Gta+Liberty+City+Stories.iso/file?dkey=vab9rmm4g7u&r=846"
+
+    // Pixeldrain - link direto
+    private val gameUrl = "https://pixeldrain.com/api/file/ZYaNEnUf"
+
     private val gameFileName = "Gta Liberty City Stories.iso"
-    private val minFileSize = 100L * 1024 * 1024 // 100 MB
+    private val minFileSize = 100L * 1024 * 1024
 
     private val gameFile: File
         get() = File(directoriesManager.getInternalRomsDirectory(), gameFileName)
@@ -115,42 +117,28 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
                 Log.d("EmuDroid", "Existe? ${gameFile.exists()}")
                 Log.d("EmuDroid", "Tamanho: ${gameFile.length()} bytes")
 
-                // 1. Verifica se a ROM existe E tem tamanho minimo
                 if (!gameFile.exists() || gameFile.length() < minFileSize) {
                     if (gameFile.exists()) {
-                        Log.d("EmuDroid", "Arquivo pequeno (${gameFile.length()}), deletando...")
+                        Log.d("EmuDroid", "Arquivo pequeno, deletando...")
                         gameFile.delete()
                     }
 
-                    // 2. Resolve o link do MediaFire
-                    updateStatus("Resolvendo link do MediaFire...", 0)
-                    val directUrl = resolveMediaFire(gameUrl)
-                    Log.d("EmuDroid", "Link direto: $directUrl")
-
-                    // 3. Baixa a ROM
                     updateStatus("Baixando GTA...", 0)
-                    downloadFile(directUrl, gameFile)
+                    downloadFile(gameUrl, gameFile)
                     Log.d("EmuDroid", "Download concluido: ${gameFile.length()} bytes")
 
-                    // 4. Valida o download
                     if (gameFile.length() < minFileSize) {
-                        throw Exception("Download incompleto: ${gameFile.length()} bytes (esperado > 100 MB)")
+                        throw Exception("Download incompleto: ${gameFile.length()} bytes")
                     }
                 } else {
-                    Log.d("EmuDroid", "ROM ja existe, pulando download")
+                    Log.d("EmuDroid", "ROM ja existe")
                 }
 
                 updateStatus("Preparando o jogo...", 100)
-                Log.d("EmuDroid", "Preparando o jogo...")
-
-                // 5. Cria/busca o Game no banco
                 val game = findOrCreateGame()
-                Log.d("EmuDroid", "Game: ${game.title} (id=${game.id})")
 
                 updateStatus("Iniciando o jogo...", 100)
-                Log.d("EmuDroid", "Iniciando o jogo...")
 
-                // 6. Roda o jogo
                 runOnUiThread {
                     gameInteractor.onGamePlay(game)
                 }
@@ -169,49 +157,12 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
         }
     }
 
-    private suspend fun resolveMediaFire(url: String): String {
-        return withContext(Dispatchers.IO) {
-            val request =
-                Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .build()
-
-            val html = okHttpClient.newCall(request).execute().body?.string() ?: ""
-            Log.d("EmuDroid", "HTML recebido: ${html.length} chars")
-
-            // Tenta varias regex
-            val patterns =
-                listOf(
-                    Regex("""href="(https://download[^"]+\.mediafire\.com[^"]+)""""),
-                    Regex("""href="(https://[^"]*mediafire\.com[^"]*\.iso[^"]*)""""),
-                    Regex("""(https://download[^"'\s]+\.mediafire\.com/[^"'\s]+)"""),
-                    Regex("""window\.location\.href\s*=\s*["']([^"']+)["']"""),
-                    Regex("""<a[^>]+class="input popsok"[^>]+href="([^"]+)""""),
-                    Regex("""<a[^>]+href="([^"]+)"[^>]*id="downloadButton""""),
-                )
-
-            for ((index, pattern) in patterns.withIndex()) {
-                val match = pattern.find(html)
-                if (match != null) {
-                    val found = match.groupValues[1]
-                    Log.d("EmuDroid", "Padrao $index encontrou: $found")
-                    return@withContext found
-                }
-            }
-
-            Log.e("EmuDroid", "Nenhum link encontrado no HTML")
-            throw Exception("Nao conseguiu resolver o link do MediaFire")
-        }
-    }
-
     private suspend fun downloadFile(url: String, destination: File) {
         withContext(Dispatchers.IO) {
             val request =
                 Request.Builder()
                     .url(url)
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                     .build()
 
             val response = okHttpClient.newCall(request).execute()
@@ -292,4 +243,4 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
             ): GameInteractor = GameInteractor(activity, retrogradeDb, false, shortcutsGenerator, gameLauncher)
         }
     }
-                          }
+}
