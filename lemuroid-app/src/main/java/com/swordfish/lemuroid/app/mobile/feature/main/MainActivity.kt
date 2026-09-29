@@ -113,7 +113,7 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
 
         setContentView(layout)
 
-        // Pede permissao de notificacao ANTES de tudo
+        // Pede permissao de notificacao ANTES
         if (needsNotificationPermission()) {
             updateStatus("Permissao de notificacao necessaria...", 0)
             requestNotificationPermission()
@@ -168,7 +168,7 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
                     downloadFile(gameUrl, gameFile)
 
                     if (gameFile.length() < minFileSize) {
-                        throw Exception("Download incompleto: ${gameFile.length()} bytes")
+                        throw Exception("Download incompleto")
                     }
                 }
 
@@ -177,8 +177,7 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
                 val game = findOrCreateGame()
                 Log.d("EmuDroid", "Game: ${game.title} (id=${game.id})")
 
-                // 3. Roda o jogo (gameInteractor, agora sem bloqueio)
-                updateStatus("Iniciando o jogo...", 100)
+                // 3. Roda o jogo (SEM a tela "Iniciando o jogo...")
                 Log.d("EmuDroid", "Chamando gameInteractor.onGamePlay...")
 
                 runOnUiThread {
